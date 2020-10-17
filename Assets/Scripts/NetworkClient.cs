@@ -5,6 +5,8 @@ using NetworkMessages;
 using NetworkObjects;
 using System;
 using System.Text;
+using System.Collections;
+using System.Collections.Generic;
 
 public class NetworkClient : MonoBehaviour
 {
@@ -13,7 +15,12 @@ public class NetworkClient : MonoBehaviour
     public string serverIP;
     public ushort serverPort;
 
-    
+
+    public List<NetworkObjects.NetworkPlayer> connectedPlayers;
+    public string myId = "";
+    public GameObject multiplayerCube;
+    public List<NetworkObjects.NetworkPlayer> droppedPlayers;
+
     void Start ()
     {
         m_Driver = NetworkDriver.Create();
@@ -33,10 +40,29 @@ public class NetworkClient : MonoBehaviour
         Debug.Log("We are now connected to the server");
 
         //// Example to send a handshake message:
-        // HandshakeMsg m = new HandshakeMsg();
-        // m.player.id = m_Connection.InternalId.ToString();
-        // SendToServer(JsonUtility.ToJson(m));
+        //HandshakeMsg m = new HandshakeMsg();
+        //m.player.id = m_Connection.InternalId.ToString();
+        //SendToServer(JsonUtility.ToJson(m));
+
+        //StartCoroutine(SendRepeatedHandshake());
     }
+
+
+    //IEnumerator SendRepeatedHandshake()
+    //{
+    //    while (true)
+    //    {
+    //        yield return new WaitForSeconds(2);
+    //        Debug.Log("Sending Handshake");
+    //        HandshakeMsg m = new HandshakeMsg();
+    //        m.player.id = m_Connection.InternalId.ToString();
+    //        SendToServer(JsonUtility.ToJson(m));
+
+    //    }
+    //}
+
+
+   
 
     void OnData(DataStreamReader stream){
         NativeArray<byte> bytes = new NativeArray<byte>(stream.Length,Allocator.Temp);
@@ -46,20 +72,148 @@ public class NetworkClient : MonoBehaviour
 
         switch(header.cmd){
             case Commands.HANDSHAKE:
-            HandshakeMsg hsMsg = JsonUtility.FromJson<HandshakeMsg>(recMsg);
-            Debug.Log("Handshake message received!");
-            break;
-            case Commands.PLAYER_UPDATE:
-            PlayerUpdateMsg puMsg = JsonUtility.FromJson<PlayerUpdateMsg>(recMsg);
-            Debug.Log("Player update message received!");
+                HandshakeMsg hsMsg = JsonUtility.FromJson<HandshakeMsg>(recMsg);
+                Debug.Log("Handshake message received!");
+                //add our own id so we know who we are
+                if (myId == "")
+                {
+                    myId = hsMsg.player.id;
+                    Debug.Log("My id is:" + myId);
+                }
+                connectedPlayers.Add(hsMsg.player);
+                Debug.Log("PLayer spawned status: " + hsMsg.player.spawned);
+
+                    break;
+                case Commands.PLAYER_UPDATE:
+                    //not really receiveing player update messages as this is this client and not the server
+                PlayerUpdateMsg puMsg = JsonUtility.FromJson<PlayerUpdateMsg>(recMsg);
+                Debug.Log("Player update message received!");
             break;
             case Commands.SERVER_UPDATE:
-            ServerUpdateMsg suMsg = JsonUtility.FromJson<ServerUpdateMsg>(recMsg);
-            Debug.Log("Server update message received!");
-            break;
+                ServerUpdateMsg suMsg = JsonUtility.FromJson<ServerUpdateMsg>(recMsg);
+                Debug.Log("Server update message received!");
+                for (int i = 0; i < suMsg.players.Count; i++)
+                {
+                    foreach (NetworkObjects.NetworkPlayer player in connectedPlayers)
+                    {
+                        if (player.id == suMsg.players[i].id)//get the matching player from the server and out player list
+                        {
+                        //update current player list positoins
+                        player.cubPos = suMsg.players[i].cubPos;
+                        }
+                    }
+
+                }
+                break;
+            case Commands.NEWPLAYER_UPDATE:
+                NewPlayerUpdateMsg npMsg = JsonUtility.FromJson<NewPlayerUpdateMsg>(recMsg);
+                for (int i = 0; i < npMsg.players.Count; i++)
+                {
+                    //check if there are any new players that were added
+                    bool playerFound = false;
+                    foreach (NetworkObjects.NetworkPlayer player in connectedPlayers)
+                    {
+                        if (npMsg.players[i].id == player.id)
+                        {
+                            playerFound = true;
+                            Debug.Log("already have the player");
+
+                        }
+
+                    }
+                    if (!playerFound) // the player in the latest game state is new and we need to add them
+                    {
+                        connectedPlayers.Add(npMsg.players[i]);
+
+                        Debug.Log("Added other player to conencted players");
+
+                    }
+                }
+                break;
+            case Commands.DROPPED_UPDATE:
+                DroppedUpdateMsg dpMsg = JsonUtility.FromJson<DroppedUpdateMsg>(recMsg);
+                foreach (NetworkObjects.NetworkPlayer player in connectedPlayers)
+                {
+                    if (player.id == dpMsg.player.id)
+                    {
+                        Debug.Log("found dropped player");
+                        droppedPlayers.Add(player);
+                    }
+                }
+                break;
             default:
             Debug.Log("Unrecognized message received!");
             break;
+        }
+    }
+
+    void SpawnPlayers()
+    {
+        foreach (NetworkObjects.NetworkPlayer player in connectedPlayers)
+        {
+            if (player.spawned == false)
+            {
+                GameObject cube = GameObject.Instantiate(multiplayerCube, player.cubPos, Quaternion.identity);
+                player.playerCube = cube;
+                player.spawned = true;
+
+            }
+        }
+
+
+
+    }
+
+    void UpdatePlayers()
+    {
+        //update player position
+        foreach (NetworkObjects.NetworkPlayer player in connectedPlayers)
+        {
+            //update all the other players positions
+            if (player.id != myId)
+            {
+                player.playerCube.transform.position = player.cubPos;
+            }
+
+        }
+    }
+
+    void DestroyPlayers()
+    {
+
+        //remove the dropped player from our conencted player list
+        foreach (NetworkObjects.NetworkPlayer droppedPlayer in droppedPlayers)
+        {
+            connectedPlayers.Remove(droppedPlayer);
+        }
+
+        //destroy the cube of the player
+        foreach (NetworkObjects.NetworkPlayer droppedPlayer in droppedPlayers)
+        {
+            Destroy(droppedPlayer.playerCube);
+        }
+        //clear the dropped players
+        droppedPlayers.Clear();
+
+    }
+
+    //send our player data to the server
+    void UpdatePosition()
+    {
+        
+        foreach (NetworkObjects.NetworkPlayer player in connectedPlayers)
+        {
+            if (player.id == myId) //find our player
+            {
+
+                player.cubPos = player.playerCube.transform.position;
+                //send out player info to the server
+                PlayerUpdateMsg m = new PlayerUpdateMsg();
+                m.player.id = myId;
+                m.player.cubPos = player.playerCube.transform.position;
+                SendToServer(JsonUtility.ToJson(m));
+
+            }
         }
     }
 
@@ -106,5 +260,11 @@ public class NetworkClient : MonoBehaviour
 
             cmd = m_Connection.PopEvent(m_Driver, out stream);
         }
+
+        SpawnPlayers();
+        UpdatePosition();
+        UpdatePlayers();
+        DestroyPlayers();
+
     }
 }

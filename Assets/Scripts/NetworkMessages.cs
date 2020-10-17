@@ -8,7 +8,9 @@ namespace NetworkMessages
         PLAYER_UPDATE,
         SERVER_UPDATE,
         HANDSHAKE,
-        PLAYER_INPUT
+        PLAYER_INPUT,
+        NEWPLAYER_UPDATE,
+        DROPPED_UPDATE
     }
 
     [System.Serializable]
@@ -49,6 +51,28 @@ namespace NetworkMessages
             players = new List<NetworkObjects.NetworkPlayer>();
         }
     }
+
+    [System.Serializable]
+    public class NewPlayerUpdateMsg : NetworkHeader
+    {
+        public List<NetworkObjects.NetworkPlayer> players;
+        public NewPlayerUpdateMsg()
+        {      // Constructor
+            cmd = Commands.NEWPLAYER_UPDATE;
+            players = new List<NetworkObjects.NetworkPlayer>();
+        }
+    }
+
+    [System.Serializable]
+    public class DroppedUpdateMsg : NetworkHeader
+    {
+        public NetworkObjects.NetworkPlayer player;
+        public DroppedUpdateMsg()
+        {      // Constructor
+            cmd = Commands.DROPPED_UPDATE;
+            player = new NetworkObjects.NetworkPlayer();
+        }
+    }
 } 
 
 namespace NetworkObjects
@@ -61,6 +85,8 @@ namespace NetworkObjects
     public class NetworkPlayer : NetworkObject{
         public Color cubeColor;
         public Vector3 cubPos;
+        public bool spawned = false;
+        public GameObject playerCube;
 
         public NetworkPlayer(){
             cubeColor = new Color();
